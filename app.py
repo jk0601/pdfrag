@@ -13,6 +13,9 @@ app.py - Streamlit 웹 애플리케이션
 """
 
 import os
+import json
+import csv
+import io
 import tempfile
 
 import streamlit as st
@@ -67,7 +70,7 @@ with st.sidebar:
 
     page = st.radio(
         "메뉴",
-        ["💬 챗봇", "📤 파일 업로드", "📋 문서 관리", "⚙️ 설정"],
+        ["💬 챗봇", "📤 파일 업로드", "📋 문서 관리", "📥 데이터 내보내기", "⚙️ 설정"],
         label_visibility="collapsed",
     )
 
@@ -363,6 +366,231 @@ def page_documents():
 
 
 # ──────────────────────────────────────────────
+# 페이지: 데이터 내보내기
+# ──────────────────────────────────────────────
+def page_export():
+    st.header("📥 데이터 내보내기")
+    st.caption("RAG 처리된 데이터를 다운로드하여 다른 데이터베이스에 넣을 수 있습니다")
+
+    errors = check_config()
+    if errors:
+        st.warning("먼저 ⚙️ 설정 페이지에서 API 키를 설정해 주세요.")
+        return
+
+    try:
+        db = SupabaseDB()
+        documents = db.list_documents()
+    except Exception as e:
+        st.error(f"데이터베이스 연결 오류: {e}")
+        return
+
+    if not documents:
+        st.info("📭 저장된 문서가 없습니다.")
+        return
+
+    # --- 문서 선택 ---
+    st.subheader("1. 내보낼 문서 선택")
+
+    doc_options = {"📚 전체 문서": None}
+    for doc in documents:
+        chunk_count = db.count_chunks(doc["id"])
+        label = f"{doc['filename']} ({chunk_count}청크)"
+        doc_options[label] = doc["id"]
+
+    selected_label = st.selectbox("문서 선택", list(doc_options.keys()))
+    selected_doc_id = doc_options[selected_label]
+
+    # --- 옵션 ---
+    st.subheader("2. 내보내기 옵션")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        export_format = st.radio("파일 형식", ["CSV", "JSON", "SQL (INSERT문)"])
+    with col2:
+        include_embedding = st.checkbox(
+            "임베딩 벡터 포함",
+            value=False,
+            help="벡터 DB로 마이그레이션할 때 필요. 파일 용량이 매우 커집니다.",
+        )
+        include_metadata = st.checkbox("메타데이터 펼치기", value=True,
+            help="metadata JSON을 개별 컬럼으로 분리합니다.")
+
+    st.divider()
+
+    # --- 미리보기 ---
+    st.subheader("3. 미리보기")
+
+    chunks = db.export_chunks(document_id=selected_doc_id, include_embedding=include_embedding)
+
+    if not chunks:
+        st.warning("내보낼 데이터가 없습니다.")
+        return
+
+    # 미리보기용 데이터 가공
+    preview_data = []
+    for c in chunks[:5]:
+        row = {
+            "chunk_id": c["id"],
+            "document_id": c["document_id"],
+            "chunk_index": c["chunk_index"],
+            "content": c["content"][:100] + "..." if len(c["content"]) > 100 else c["content"],
+        }
+        if include_metadata and c.get("metadata"):
+            meta = c["metadata"] if isinstance(c["metadata"], dict) else {}
+            row["filename"] = meta.get("filename", "")
+            row["file_type"] = meta.get("file_type", "")
+            row["page_number"] = meta.get("page_number", "")
+        if include_embedding:
+            emb = c.get("embedding")
+            if emb:
+                row["embedding"] = f"[{len(emb) if isinstance(emb, list) else '?'}차원 벡터]"
+        preview_data.append(row)
+
+    st.dataframe(preview_data, use_container_width=True)
+    st.caption(f"총 {len(chunks)}개 청크 중 상위 5개 미리보기")
+
+    st.divider()
+
+    # --- 다운로드 ---
+    st.subheader("4. 다운로드")
+
+    # 내보내기용 전체 데이터 가공
+    export_rows = []
+    for c in chunks:
+        row = {
+            "chunk_id": c["id"],
+            "document_id": c["document_id"],
+            "chunk_index": c["chunk_index"],
+            "content": c["content"],
+        }
+        if include_metadata and c.get("metadata"):
+            meta = c["metadata"] if isinstance(c["metadata"], dict) else {}
+            row["filename"] = meta.get("filename", "")
+            row["file_type"] = meta.get("file_type", "")
+            row["page_number"] = meta.get("page_number", "")
+        else:
+            row["metadata"] = json.dumps(c.get("metadata", {}), ensure_ascii=False)
+        row["created_at"] = c.get("created_at", "")
+        if include_embedding:
+            emb = c.get("embedding")
+            if isinstance(emb, list):
+                row["embedding"] = json.dumps(emb)
+            else:
+                row["embedding"] = str(emb) if emb else ""
+        export_rows.append(row)
+
+    file_suffix = f"_{documents[0]['filename'].split('.')[0]}" if selected_doc_id else "_all"
+
+    if export_format == "CSV":
+        output = io.StringIO()
+        if export_rows:
+            writer = csv.DictWriter(output, fieldnames=export_rows[0].keys())
+            writer.writeheader()
+            writer.writerows(export_rows)
+        csv_data = output.getvalue()
+
+        st.download_button(
+            label=f"⬇️ CSV 다운로드 ({len(export_rows)}행)",
+            data=csv_data,
+            file_name=f"rag_chunks{file_suffix}.csv",
+            mime="text/csv",
+            type="primary",
+            use_container_width=True,
+        )
+
+    elif export_format == "JSON":
+        json_data = json.dumps(export_rows, ensure_ascii=False, indent=2)
+
+        st.download_button(
+            label=f"⬇️ JSON 다운로드 ({len(export_rows)}행)",
+            data=json_data,
+            file_name=f"rag_chunks{file_suffix}.json",
+            mime="application/json",
+            type="primary",
+            use_container_width=True,
+        )
+
+    elif export_format == "SQL (INSERT문)":
+        sql_lines = []
+        table_name = "document_chunks"
+        for row in export_rows:
+            cols = list(row.keys())
+            vals = []
+            for v in row.values():
+                if v is None:
+                    vals.append("NULL")
+                elif isinstance(v, (int, float)):
+                    vals.append(str(v))
+                else:
+                    escaped = str(v).replace("'", "''")
+                    vals.append(f"'{escaped}'")
+            sql_lines.append(
+                f"INSERT INTO {table_name} ({', '.join(cols)}) VALUES ({', '.join(vals)});"
+            )
+        sql_data = "\n".join(sql_lines)
+
+        st.download_button(
+            label=f"⬇️ SQL 다운로드 ({len(export_rows)}행)",
+            data=sql_data,
+            file_name=f"rag_chunks{file_suffix}.sql",
+            mime="text/plain",
+            type="primary",
+            use_container_width=True,
+        )
+
+    # --- 문서 메타데이터도 별도 다운로드 ---
+    st.divider()
+    with st.expander("📄 문서 메타데이터도 다운로드"):
+        doc_data = db.export_documents()
+        doc_json = json.dumps(doc_data, ensure_ascii=False, indent=2)
+        st.download_button(
+            label=f"⬇️ 문서 목록 JSON ({len(doc_data)}개)",
+            data=doc_json,
+            file_name="documents_metadata.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+    # --- MySQL 가이드 ---
+    st.divider()
+    with st.expander("🐬 MySQL에 넣는 방법 안내"):
+        st.markdown("""
+**1. MySQL 테이블 생성**
+
+```sql
+CREATE TABLE document_chunks (
+    chunk_id BIGINT PRIMARY KEY,
+    document_id BIGINT,
+    chunk_index INT,
+    content LONGTEXT,
+    filename VARCHAR(255),
+    file_type VARCHAR(50),
+    page_number INT,
+    created_at DATETIME,
+    embedding JSON  -- 벡터 포함 시
+);
+```
+
+**2. CSV로 가져오기**
+
+```sql
+LOAD DATA INFILE '/path/to/rag_chunks.csv'
+INTO TABLE document_chunks
+FIELDS TERMINATED BY ','
+ENCLOSED BY '"'
+LINES TERMINATED BY '\\n'
+IGNORE 1 ROWS;
+```
+
+**3. 또는 SQL INSERT문 파일을 직접 실행**
+
+```bash
+mysql -u root -p database_name < rag_chunks.sql
+```
+""")
+
+
+# ──────────────────────────────────────────────
 # 페이지: 설정
 # ──────────────────────────────────────────────
 def page_settings():
@@ -433,5 +661,7 @@ elif page == "📤 파일 업로드":
     page_upload()
 elif page == "📋 문서 관리":
     page_documents()
+elif page == "📥 데이터 내보내기":
+    page_export()
 elif page == "⚙️ 설정":
     page_settings()

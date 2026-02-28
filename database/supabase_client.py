@@ -229,3 +229,48 @@ class SupabaseDB:
             "with_embedding": with_embedding,
             "without_embedding": total - with_embedding,
         }
+
+    # ------------------------------------------------------------------
+    # 데이터 내보내기 (Export)
+    # ------------------------------------------------------------------
+
+    def export_chunks(
+        self,
+        document_id: int | None = None,
+        include_embedding: bool = False,
+    ) -> list[dict]:
+        """
+        청크 데이터를 내보내기용으로 조회합니다.
+
+        Args:
+            document_id: 특정 문서만 내보내려면 ID 지정, None이면 전체
+            include_embedding: 임베딩 벡터 포함 여부 (용량이 매우 큼)
+
+        Returns:
+            내보내기용 데이터 리스트
+        """
+        columns = "id, document_id, chunk_index, content, metadata, created_at"
+        if include_embedding:
+            columns += ", embedding"
+
+        query = (
+            self.client.table("document_chunks")
+            .select(columns)
+            .order("document_id")
+            .order("chunk_index")
+        )
+        if document_id is not None:
+            query = query.eq("document_id", document_id)
+
+        result = query.execute()
+        return result.data
+
+    def export_documents(self) -> list[dict]:
+        """문서 메타데이터를 내보내기용으로 조회합니다."""
+        result = (
+            self.client.table("documents")
+            .select("*")
+            .order("id")
+            .execute()
+        )
+        return result.data
