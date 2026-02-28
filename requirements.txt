@@ -1,0 +1,30 @@
+# ============================================================
+# PDF-RAG 프로젝트 의존성 패키지 목록
+# ============================================================
+# 설치 방법: pip install -r requirements.txt
+# ============================================================
+
+# --- OpenAI API (임베딩 생성 및 챗봇 응답) ---
+openai>=1.14.0
+
+# --- Supabase (벡터 DB 및 데이터 저장) ---
+supabase>=2.4.0
+
+# --- 문서 처리 ---
+PyMuPDF>=1.24.0          # PDF 텍스트 및 이미지 추출
+python-pptx>=0.6.23      # PowerPoint 파일 처리
+Pillow>=10.2.0           # 이미지 처리
+pytesseract>=0.3.10      # 이미지에서 텍스트 추출 (OCR)
+
+# --- RAG 파이프라인 ---
+langchain>=0.3.0         # RAG 프레임워크
+langchain-openai>=0.3.0  # LangChain OpenAI 통합
+langchain-text-splitters>=0.3.0  # 텍스트 분할
+
+# --- 웹 UI ---
+streamlit>=1.40.0        # 웹 애플리케이션 프레임워크
+
+# --- 유틸리티 ---
+python-dotenv>=1.0.0     # 환경변수 관리
+tiktoken>=0.7.0          # OpenAI 토큰 카운터
+rich>=13.7.0             # 터미널 UI (예쁜 출력)
