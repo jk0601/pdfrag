@@ -38,6 +38,48 @@ st.set_page_config(
 
 
 # ──────────────────────────────────────────────
+# 비밀번호 인증
+# ──────────────────────────────────────────────
+def check_password() -> bool:
+    """비밀번호 확인. Secrets에 APP_PASSWORD가 없으면 인증 없이 통과."""
+    try:
+        password = st.secrets.get("APP_PASSWORD", "")
+    except Exception:
+        password = os.getenv("APP_PASSWORD", "")
+
+    if not password:
+        return True
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.markdown(
+        "<h1 style='text-align:center; margin-top:80px'>📚 PDF-RAG 문서 챗봇</h1>"
+        "<p style='text-align:center; color:gray'>접근하려면 비밀번호를 입력하세요</p>",
+        unsafe_allow_html=True,
+    )
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("login_form"):
+            pw_input = st.text_input("비밀번호", type="password", placeholder="비밀번호 입력")
+            submitted = st.form_submit_button("로그인", use_container_width=True, type="primary")
+
+            if submitted:
+                if pw_input == password:
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("❌ 비밀번호가 틀렸습니다.")
+
+    return False
+
+
+if not check_password():
+    st.stop()
+
+
+# ──────────────────────────────────────────────
 # 세션 상태 초기화
 # ──────────────────────────────────────────────
 if "chat_messages" not in st.session_state:
