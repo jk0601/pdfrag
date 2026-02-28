@@ -102,6 +102,34 @@ def page_chat():
         st.warning("먼저 ⚙️ 설정 페이지에서 API 키를 설정해 주세요.")
         return
 
+    # --- 사이드바: 챗봇 설정 슬라이더 ---
+    with st.sidebar:
+        st.divider()
+        st.subheader("🎛️ 챗봇 설정")
+
+        top_k = st.slider(
+            "참고 청크 수 (top_k)",
+            min_value=1, max_value=20, value=5,
+            help="질문에 답할 때 참고할 문서 조각 수. 높을수록 더 많은 내용을 참고하지만 비용 증가",
+        )
+        threshold = st.slider(
+            "유사도 임계값",
+            min_value=0.0, max_value=1.0, value=0.2, step=0.05,
+            help="0에 가까울수록 느슨하게 검색, 1에 가까울수록 엄격하게 검색",
+        )
+
+        st.caption(
+            f"📊 예상 참고량: 약 {top_k * Config.CHUNK_SIZE:,}자\n\n"
+            f"- 참고 청크 수 ↑ → 넓고 상세한 답변\n"
+            f"- 유사도 임계값 ↑ → 관련성 높은 것만"
+        )
+
+    # 설정이 변경되면 챗봇 인스턴스 갱신
+    chatbot = get_chatbot()
+    if chatbot.top_k != top_k or chatbot.threshold != threshold:
+        chatbot.top_k = top_k
+        chatbot.threshold = threshold
+
     # DB 상태 표시
     try:
         db = SupabaseDB()
@@ -120,7 +148,6 @@ def page_chat():
     with col2:
         if st.button("🔄 대화 초기화", use_container_width=True):
             st.session_state.chat_messages = []
-            chatbot = get_chatbot()
             chatbot.reset_history()
             st.rerun()
 
@@ -138,7 +165,6 @@ def page_chat():
             st.markdown(question)
 
         with st.chat_message("assistant"):
-            chatbot = get_chatbot()
             response = st.write_stream(chatbot.stream_answer(question))
 
         st.session_state.chat_messages.append(
