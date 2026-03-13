@@ -47,10 +47,19 @@ class ImageProcessor:
         if not use_vision_api:
             try:
                 import pytesseract
+                import shutil
 
+                # Streamlit Cloud(Linux)에서 tesseract 경로를 자동 탐색
+                tesseract_path = shutil.which("tesseract")
+                if tesseract_path:
+                    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+                elif os.path.exists("/usr/bin/tesseract"):
+                    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+
+                pytesseract.get_tesseract_version()
                 self.pytesseract = pytesseract
                 self.tesseract_available = True
-            except ImportError:
+            except Exception:
                 self.tesseract_available = False
         else:
             self.tesseract_available = False
@@ -88,22 +97,27 @@ class ImageProcessor:
     def extract_text_from_image(self, image: Image.Image) -> str:
         """
         PIL Image 객체에서 텍스트를 추출합니다.
-        (PDF 프로세서에서도 호출하기 위해 별도 메서드로 분리)
+        OCR이 불가능하면 빈 문자열을 반환합니다 (에러 메시지를 데이터에 넣지 않음).
         """
         if self.use_vision_api:
             return self._extract_with_vision_api(image)
         elif self.tesseract_available:
             return self._extract_with_tesseract(image)
         else:
-            return "[OCR 불가: Tesseract가 설치되지 않았습니다]"
+            return ""
 
     def _extract_with_tesseract(self, image: Image.Image) -> str:
-        """Tesseract OCR로 텍스트 추출"""
-        try:
-            text = self.pytesseract.image_to_string(image, lang="kor+eng")
-            return text.strip()
-        except Exception as e:
-            return f"[OCR 오류: {e}]"
+        """Tesseract OCR로 텍스트 추출 (한국어 → 영어 → 기본 순서로 시도)"""
+        for lang in ["kor+eng", "eng", None]:
+            try:
+                if lang:
+                    text = self.pytesseract.image_to_string(image, lang=lang)
+                else:
+                    text = self.pytesseract.image_to_string(image)
+                return text.strip()
+            except Exception:
+                continue
+        return ""
 
     def _extract_with_vision_api(self, image: Image.Image) -> str:
         """OpenAI Vision API로 이미지 분석"""
