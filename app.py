@@ -474,6 +474,12 @@ def page_export():
     col1, col2 = st.columns(2)
     with col1:
         export_format = st.radio("파일 형식", ["CSV", "JSON", "SQL (INSERT문)"])
+        csv_schema = st.radio(
+            "컬럼 구조",
+            ["Supabase 동일 (7열)", "MySQL용 분리형 (9열)"],
+            help="Supabase: id, metadata(JSON). MySQL용: chunk_id, filename, file_type, page_number 분리",
+            horizontal=True,
+        )
     with col2:
         include_embedding = st.checkbox(
             "임베딩 벡터 포함",
@@ -523,24 +529,41 @@ def page_export():
     st.subheader("4. 다운로드")
 
     # 내보내기용 전체 데이터 가공
-    # DB 스키마와 필드 순서/이름 일치 (chunk_id, document_id, chunk_index, content, filename, file_type, page_number, created_at, embedding)
-    CSV_FIELDS = ["chunk_id", "document_id", "chunk_index", "content", "filename", "file_type", "page_number", "created_at", "embedding"]
+    use_supabase_schema = csv_schema == "Supabase 동일 (7열)"
+    if use_supabase_schema:
+        FIELDS = ["id", "document_id", "chunk_index", "content", "metadata", "embedding", "created_at"]
+    else:
+        FIELDS = ["chunk_id", "document_id", "chunk_index", "content", "filename", "file_type", "page_number", "created_at", "embedding"]
+
     export_rows = []
     for c in chunks:
         meta = c.get("metadata") or {}
         if not isinstance(meta, dict):
             meta = {}
-        row = {
-            "chunk_id": c["id"],
-            "document_id": c["document_id"],
-            "chunk_index": c["chunk_index"],
-            "content": c["content"],
-            "filename": meta.get("filename", ""),
-            "file_type": meta.get("file_type", ""),
-            "page_number": meta.get("page_number", ""),
-            "created_at": c.get("created_at", ""),
-            "embedding": "",
-        }
+
+        if use_supabase_schema:
+            row = {
+                "id": c["id"],
+                "document_id": c["document_id"],
+                "chunk_index": c["chunk_index"],
+                "content": c["content"],
+                "metadata": json.dumps(meta, ensure_ascii=False),
+                "embedding": "",
+                "created_at": c.get("created_at", ""),
+            }
+        else:
+            row = {
+                "chunk_id": c["id"],
+                "document_id": c["document_id"],
+                "chunk_index": c["chunk_index"],
+                "content": c["content"],
+                "filename": meta.get("filename", ""),
+                "file_type": meta.get("file_type", ""),
+                "page_number": meta.get("page_number", ""),
+                "created_at": c.get("created_at", ""),
+                "embedding": "",
+            }
+
         if include_embedding and c.get("embedding"):
             emb = c["embedding"]
             row["embedding"] = json.dumps(emb) if isinstance(emb, list) else str(emb)
@@ -551,7 +574,7 @@ def page_export():
     if export_format == "CSV":
         output = io.StringIO()
         if export_rows:
-            writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, extrasaction="ignore")
+            writer = csv.DictWriter(output, fieldnames=FIELDS, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(export_rows)
         csv_data = "\ufeff" + output.getvalue()  # UTF-8 BOM: Excel에서 한글 정상 표시
@@ -618,18 +641,26 @@ def page_export():
             use_container_width=True,
         )
 
-    # --- MySQL 가이드 ---
+    # --- DB 가이드 ---
     st.divider()
-    with st.expander("🐬 MySQL에 넣는 방법 안내"):
+    with st.expander("🐬 Supabase / MySQL 가이드"):
         st.markdown("""
-**⚠️ 한글 인코딩**: CSV는 UTF-8(BOM)으로 저장됩니다. Excel에서 열면 한글이 정상 표시됩니다.
+**⚠️ 한글**: CSV는 UTF-8(BOM). phpMyAdmin Import 시 "첫 줄 건너뛰기" 또는 첫 줄 삭제 후 업로드.
 
-**1. MySQL 테이블 생성** (한글을 위해 `utf8mb4` 사용)
+---
+
+**Supabase 동일 (7열)** 선택 시:
+- 컬럼: `id`, `document_id`, `chunk_index`, `content`, `metadata`, `embedding`, `created_at`
+- Supabase 백업·복원 또는 JSON 컬럼 있는 DB에 적합
+
+**MySQL용 분리형 (9열)** 선택 시:
+- 컬럼: `chunk_id`, `document_id`, `chunk_index`, `content`, `filename`, `file_type`, `page_number`, `created_at`, `embedding`
+
+---
+
+**MySQL 테이블 예시 (9열용)**
 
 ```sql
-CREATE DATABASE my_rag CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE my_rag;
-
 CREATE TABLE document_chunks (
     chunk_id BIGINT PRIMARY KEY,
     document_id BIGINT,
@@ -643,22 +674,18 @@ CREATE TABLE document_chunks (
 );
 ```
 
-**2. CSV로 가져오기**
+**MySQL 테이블 예시 (7열 Supabase형)**
 
 ```sql
-LOAD DATA INFILE '/path/to/rag_chunks.csv'
-INTO TABLE document_chunks
-CHARACTER SET utf8mb4
-FIELDS TERMINATED BY ','
-ENCLOSED BY '"'
-LINES TERMINATED BY '\\n'
-IGNORE 1 ROWS;
-```
-
-**3. 또는 SQL INSERT문 실행**
-
-```bash
-mysql -u root -p --default-character-set=utf8mb4 my_rag < rag_chunks.sql
+CREATE TABLE document_chunks (
+    id BIGINT PRIMARY KEY,
+    document_id BIGINT,
+    chunk_index INT,
+    content LONGTEXT CHARACTER SET utf8mb4,
+    metadata JSON,
+    embedding JSON,
+    created_at DATETIME
+);
 ```
 """)
 
