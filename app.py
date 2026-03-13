@@ -555,7 +555,7 @@ def page_export():
             writer = csv.DictWriter(output, fieldnames=export_rows[0].keys())
             writer.writeheader()
             writer.writerows(export_rows)
-        csv_data = output.getvalue()
+        csv_data = "\ufeff" + output.getvalue()  # UTF-8 BOM: Excel에서 한글 정상 표시
 
         st.download_button(
             label=f"⬇️ CSV 다운로드 ({len(export_rows)}행)",
@@ -623,19 +623,24 @@ def page_export():
     st.divider()
     with st.expander("🐬 MySQL에 넣는 방법 안내"):
         st.markdown("""
-**1. MySQL 테이블 생성**
+**⚠️ 한글 인코딩**: CSV는 UTF-8(BOM)으로 저장됩니다. Excel에서 열면 한글이 정상 표시됩니다.
+
+**1. MySQL 테이블 생성** (한글을 위해 `utf8mb4` 사용)
 
 ```sql
+CREATE DATABASE my_rag CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE my_rag;
+
 CREATE TABLE document_chunks (
     chunk_id BIGINT PRIMARY KEY,
     document_id BIGINT,
     chunk_index INT,
-    content LONGTEXT,
+    content LONGTEXT CHARACTER SET utf8mb4,
     filename VARCHAR(255),
     file_type VARCHAR(50),
     page_number INT,
     created_at DATETIME,
-    embedding JSON  -- 벡터 포함 시
+    embedding JSON
 );
 ```
 
@@ -644,16 +649,17 @@ CREATE TABLE document_chunks (
 ```sql
 LOAD DATA INFILE '/path/to/rag_chunks.csv'
 INTO TABLE document_chunks
+CHARACTER SET utf8mb4
 FIELDS TERMINATED BY ','
 ENCLOSED BY '"'
 LINES TERMINATED BY '\\n'
 IGNORE 1 ROWS;
 ```
 
-**3. 또는 SQL INSERT문 파일을 직접 실행**
+**3. 또는 SQL INSERT문 실행**
 
 ```bash
-mysql -u root -p database_name < rag_chunks.sql
+mysql -u root -p --default-character-set=utf8mb4 my_rag < rag_chunks.sql
 ```
 """)
 
