@@ -523,28 +523,27 @@ def page_export():
     st.subheader("4. 다운로드")
 
     # 내보내기용 전체 데이터 가공
+    # DB 스키마와 필드 순서/이름 일치 (chunk_id, document_id, chunk_index, content, filename, file_type, page_number, created_at, embedding)
+    CSV_FIELDS = ["chunk_id", "document_id", "chunk_index", "content", "filename", "file_type", "page_number", "created_at", "embedding"]
     export_rows = []
     for c in chunks:
+        meta = c.get("metadata") or {}
+        if not isinstance(meta, dict):
+            meta = {}
         row = {
             "chunk_id": c["id"],
             "document_id": c["document_id"],
             "chunk_index": c["chunk_index"],
             "content": c["content"],
+            "filename": meta.get("filename", ""),
+            "file_type": meta.get("file_type", ""),
+            "page_number": meta.get("page_number", ""),
+            "created_at": c.get("created_at", ""),
+            "embedding": "",
         }
-        if include_metadata and c.get("metadata"):
-            meta = c["metadata"] if isinstance(c["metadata"], dict) else {}
-            row["filename"] = meta.get("filename", "")
-            row["file_type"] = meta.get("file_type", "")
-            row["page_number"] = meta.get("page_number", "")
-        else:
-            row["metadata"] = json.dumps(c.get("metadata", {}), ensure_ascii=False)
-        row["created_at"] = c.get("created_at", "")
-        if include_embedding:
-            emb = c.get("embedding")
-            if isinstance(emb, list):
-                row["embedding"] = json.dumps(emb)
-            else:
-                row["embedding"] = str(emb) if emb else ""
+        if include_embedding and c.get("embedding"):
+            emb = c["embedding"]
+            row["embedding"] = json.dumps(emb) if isinstance(emb, list) else str(emb)
         export_rows.append(row)
 
     file_suffix = f"_{documents[0]['filename'].split('.')[0]}" if selected_doc_id else "_all"
@@ -552,7 +551,7 @@ def page_export():
     if export_format == "CSV":
         output = io.StringIO()
         if export_rows:
-            writer = csv.DictWriter(output, fieldnames=export_rows[0].keys())
+            writer = csv.DictWriter(output, fieldnames=CSV_FIELDS, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(export_rows)
         csv_data = "\ufeff" + output.getvalue()  # UTF-8 BOM: Excel에서 한글 정상 표시
